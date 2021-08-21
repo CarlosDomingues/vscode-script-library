@@ -17,6 +17,7 @@ jobs:
         run: |
           echo $GITHUB_WORKSPACE
           pwd
+          git switch -c release
           git clone https://github.com/microsoft/vscode-dev-containers.git
           cp -r vscode-dev-containers/script-library/*.sh .
           rm -rf vscode-dev-containers
@@ -26,5 +27,5 @@ jobs:
           git add .
           git status
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-          git commit -am "Auto updated scripts" && git push || echo "No changes to commit"
+          git commit -am "Auto updated scripts" && git push origin release || echo "No changes to commit"
 
