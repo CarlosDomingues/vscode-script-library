@@ -18,4 +18,4 @@ git submodule add git@github.com:CarlosDomingues/vscode-script-library.git .devc
 
 ## Script documentation
 
-[Can be found here.](https://github.com/microsoft/vscode-dev-containers/tree/main/script-library).
+[Can be found here](https://github.com/microsoft/vscode-dev-containers/tree/main/script-library)
