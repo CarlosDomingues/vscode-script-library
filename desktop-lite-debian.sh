@@ -7,14 +7,16 @@
 # Docs: https://github.com/microsoft/vscode-dev-containers/blob/main/script-library/docs/desktop-lite.md
 # Maintainer: The VS Code and Codespaces Teams
 #
-# Syntax: ./desktop-lite-debian.sh [non-root user] [vnc password] [install no vnc flag]
+# Syntax: ./desktop-lite-debian.sh [non-root user] [Desktop password] [Install web client flag] [VNC port] [Web Port]
 
 USERNAME=${1:-"automatic"}
 VNC_PASSWORD=${2:-"vscode"}
 INSTALL_NOVNC=${3:-"true"}
+VNC_PORT="${4:-5901}"
+NOVNC_PORT="${5:-6080}"
 
 NOVNC_VERSION=1.2.0
-WEBSOCKETIFY_VERSION=0.9.0
+WEBSOCKETIFY_VERSION=0.10.0
 
 package_list="
     tigervnc-standalone-server \
@@ -77,6 +79,71 @@ if [ "${USERNAME}" = "auto" ] || [ "${USERNAME}" = "automatic" ]; then
 elif [ "${USERNAME}" = "none" ] || ! id -u ${USERNAME} > /dev/null 2>&1; then
     USERNAME=root
 fi
+# Add default Fluxbox config files if none are already present
+fluxbox_apps="$(cat \
+<< 'EOF'
+[transient] (role=GtkFileChooserDialog)
+  [Dimensions]	{70% 70%}
+  [Position]	(CENTER)	{0 0}
+[end]
+EOF
+)"
+
+fluxbox_init="$(cat \
+<< 'EOF'
+session.configVersion:	13
+session.menuFile:	~/.fluxbox/menu
+session.keyFile: ~/.fluxbox/keys
+session.styleFile: /usr/share/fluxbox/styles/qnx-photon
+session.screen0.workspaces: 1
+session.screen0.workspacewarping: false
+session.screen0.toolbar.widthPercent: 100
+session.screen0.strftimeFormat: %a %l:%M %p
+session.screen0.toolbar.tools: RootMenu, clock, iconbar, systemtray
+session.screen0.workspaceNames: One,
+EOF
+)"
+
+fluxbox_menu="$(cat \
+<< 'EOF'
+[begin] (  Application Menu  )
+    [exec] (File Manager) { nautilus ~ } <>
+    [exec] (Text Editor) { mousepad } <>
+    [exec] (Terminal) { tilix -w ~ -e $(readlink -f /proc/$$/exe) -il } <>
+    [exec] (Web Browser) { x-www-browser --disable-dev-shm-usage } <>
+    [submenu] (System) {}
+        [exec] (Set Resolution) { tilix -t "Set Resolution" -e bash /usr/local/bin/set-resolution } <>
+        [exec] (Edit Application Menu) { mousepad ~/.fluxbox/menu } <>
+        [exec] (Passwords and Keys) { seahorse } <>
+        [exec] (Top Processes) { tilix -t "Top" -e htop } <>
+        [exec] (Disk Utilization) { tilix -t "Disk Utilization" -e ncdu / } <>
+        [exec] (Editres) {editres} <>
+        [exec] (Xfontsel) {xfontsel} <>
+        [exec] (Xkill) {xkill} <>
+        [exec] (Xrefresh) {xrefresh} <>
+    [end]
+    [config] (Configuration)
+    [workspaces] (Workspaces)
+[end]
+EOF
+)"
+
+# Copy config files if the don't already exist
+copy_fluxbox_config() {
+    local target_dir="$1"
+    mkdir -p "${target_dir}/.fluxbox"
+    touch "${target_dir}/.Xmodmap"
+    if [ ! -e "${target_dir}/.fluxbox/apps" ]; then
+        echo "${fluxbox_apps}" > "${target_dir}/.fluxbox/apps"
+    fi
+    if [ ! -e "${target_dir}/.fluxbox/init" ]; then
+        echo "${fluxbox_init}" > "${target_dir}/.fluxbox/init"
+    fi
+    if [ ! -e "${target_dir}/.fluxbox/menu" ]; then
+        echo "${fluxbox_menu}" > "${target_dir}/.fluxbox/menu"
+    fi
+}
+
 
 # Function to run apt-get if needed
 apt_get_update_if_needed()
@@ -117,6 +184,8 @@ if [[ -z $(apt-cache --names-only search ^tilix$) ]]; then
     else
         package_list="${package_list} tilix"
     fi
+else
+    package_list="${package_list} tilix"
 fi
 
 # Install X11, fluxbox and VS Code dependencies
@@ -129,7 +198,7 @@ fi
 
 # Check at least one locale exists
 if ! grep -o -E '^\s*en_US.UTF-8\s+UTF-8' /etc/locale.gen > /dev/null; then
-    echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen 
+    echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
     locale-gen
 fi
 
@@ -153,30 +222,18 @@ if [ "${INSTALL_NOVNC}" = "true" ] && [ ! -d "/usr/local/novnc" ]; then
     ln -s /usr/local/novnc/websockify-${WEBSOCKETIFY_VERSION} /usr/local/novnc/noVNC-${NOVNC_VERSION}/utils/websockify
     rm -f /tmp/websockify-install.zip /tmp/novnc-install.zip
 
-    # noVNC works best with Python 2 right now. Install the right package and use it.
-    if  [[ -z $(apt-cache --names-only search '^python2-minimal$') ]]; then
-        novnc_python_package="python-minimal"
-    else
-        novnc_python_package="python2-minimal"
+    # Install noVNC dependencies and use them.
+    if ! dpkg -s python3-minimal python3-numpy > /dev/null 2>&1; then
+        apt-get -y install --no-install-recommends python3-minimal python3-numpy
     fi
-    # Distros all have python-numpy for python2 right now, but future proof
-    if [[ -z $(apt-cache --names-only search '^python2-numpy$') ]]; then
-        novnc_numpy_package="python-numpy"
-    else
-        novnc_numpy_package="python2-numpy"
-    fi
-    if ! dpkg -s ${novnc_python_package} ${novnc_numpy_package} > /dev/null 2>&1; then
-        apt-get -y install --no-install-recommends ${novnc_python_package} ${novnc_numpy_package}
-    fi
-    sed -i -E 's/^python /python2 /' /usr/local/novnc/websockify-${WEBSOCKETIFY_VERSION}/run
-fi 
+    sed -i -E 's/^python /python3 /' /usr/local/novnc/websockify-${WEBSOCKETIFY_VERSION}/run
+fi
 
 # Set up folders for scripts and init files
-mkdir -p /var/run/dbus /usr/local/etc/vscode-dev-containers/ /root/.fluxbox
+mkdir -p /var/run/dbus /usr/local/etc/vscode-dev-containers/
 
 # Script to change resolution of desktop
-tee /usr/local/bin/set-resolution > /dev/null \
-<< EOF
+cat << EOF > /usr/local/bin/set-resolution
 #!/bin/bash
 RESOLUTION=\${1:-\${VNC_RESOLUTION:-1920x1080}}
 DPI=\${2:-\${VNC_DPI:-96}}
@@ -204,7 +261,7 @@ fi
 
 xrandr --fb \${RESOLUTION} --dpi \${DPI} > /dev/null 2>&1
 
-if [ \$? -ne 0 ] && [ "\${IGNORE_ERROR}" != "true" ]; then 
+if [ \$? -ne 0 ] && [ "\${IGNORE_ERROR}" != "true" ]; then
     echo -e "\nFAILED TO SET RESOLUTION!\n"
     exit 1
 fi
@@ -213,12 +270,17 @@ echo -e "\nSuccess!\n"
 EOF
 
 # Container ENTRYPOINT script
-tee /usr/local/share/desktop-init.sh > /dev/null \
-<< EOF 
- #!/bin/bash
+cat << EOF > /usr/local/share/desktop-init.sh
+#!/bin/bash
 
 USERNAME=${USERNAME}
 LOG=/tmp/container-init.log
+
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-"autolaunch:"}"
+export DISPLAY="${DISPLAY:-:1}"
+export VNC_RESOLUTION="${VNC_RESOLUTION:-1440x768x16}" 
+export LANG="${LANG:-"en_US.UTF-8"}"
+export LANGUAGE="${LANGUAGE:-"en_US.UTF-8"}"
 
 # Execute the command it not already running
 startInBackgroundIfNotRunning()
@@ -287,11 +349,13 @@ mkdir -p /tmp/.X11-unix
 sudoIf chmod 1777 /tmp/.X11-unix
 sudoIf chown root:\${USERNAME} /tmp/.X11-unix
 if [ "\$(echo "\${VNC_RESOLUTION}" | tr -cd 'x' | wc -c)" = "1" ]; then VNC_RESOLUTION=\${VNC_RESOLUTION}x16; fi
-startInBackgroundIfNotRunning "Xtigervnc" sudoUserIf "tigervncserver -screen \${DISPLAY:-:1} \${VNC_RESOLUTION:-1440x768x16} -rfbport \${VNC_PORT:-5901} -dpi \${VNC_DPI:-96} -localhost -desktop fluxbox -fg -passwd /usr/local/etc/vscode-dev-containers/vnc-passwd"
+screen_geometry="\${VNC_RESOLUTION%*x*}"
+screen_depth="\${VNC_RESOLUTION##*x}"
+startInBackgroundIfNotRunning "Xtigervnc" sudoUserIf "tigervncserver \${DISPLAY} -geometry \${screen_geometry} -depth \${screen_depth} -rfbport ${VNC_PORT} -dpi \${VNC_DPI:-96} -localhost -desktop fluxbox -fg -passwd /usr/local/etc/vscode-dev-containers/vnc-passwd"
 
 # Spin up noVNC if installed and not runnning.
 if [ -d "/usr/local/novnc" ] && [ "\$(ps -ef | grep /usr/local/novnc/noVNC*/utils/launch.sh | grep -v grep)" = "" ]; then
-    keepRunningInBackground "noVNC" sudoIf "/usr/local/novnc/noVNC*/utils/launch.sh --listen \${NOVNC_PORT:-6080} --vnc localhost:\${VNC_PORT:-5901}"
+    keepRunningInBackground "noVNC" sudoIf "/usr/local/novnc/noVNC*/utils/launch.sh --listen ${NOVNC_PORT} --vnc localhost:${VNC_PORT}"
     log "noVNC started."
 else
     log "noVNC is already running or not installed."
@@ -304,60 +368,26 @@ log "** SCRIPT EXIT **"
 EOF
 
 echo "${VNC_PASSWORD}" | vncpasswd -f > /usr/local/etc/vscode-dev-containers/vnc-passwd
-touch /root/.Xmodmap 
 chmod +x /usr/local/share/desktop-init.sh /usr/local/bin/set-resolution
 
-tee /root/.fluxbox/apps > /dev/null \
-<<EOF
-[transient] (role=GtkFileChooserDialog)
-  [Dimensions]	{70% 70%}
-  [Position]	(CENTER)	{0 0}
-[end]
-EOF
-
-tee /root/.fluxbox/init > /dev/null \
-<<EOF
-session.configVersion:	13
-session.menuFile:	~/.fluxbox/menu
-session.keyFile: ~/.fluxbox/keys
-session.styleFile: /usr/share/fluxbox/styles/qnx-photon
-session.screen0.workspaces: 1
-session.screen0.workspacewarping: false
-session.screen0.toolbar.widthPercent: 100
-session.screen0.strftimeFormat: %a %l:%M %p
-session.screen0.toolbar.tools: RootMenu, clock, iconbar, systemtray
-session.screen0.workspaceNames: One,
-EOF
-
-tee /root/.fluxbox/menu > /dev/null \
-<<EOF
-[begin] (  Application Menu  )
-    [exec] (File Manager) { nautilus ~ } <>
-    [exec] (Text Editor) { mousepad } <>
-    [exec] (Terminal) { tilix -w ~ -e $(readlink -f /proc/$$/exe) -il } <>
-    [exec] (Web Browser) { x-www-browser --disable-dev-shm-usage } <>
-    [submenu] (System) {}
-        [exec] (Set Resolution) { tilix -t "Set Resolution" -e bash /usr/local/bin/set-resolution } <>
-        [exec] (Edit Application Menu) { mousepad ~/.fluxbox/menu } <>
-        [exec] (Passwords and Keys) { seahorse } <>
-        [exec] (Top Processes) { tilix -t "Top" -e htop } <>
-        [exec] (Disk Utilization) { tilix -t "Disk Utilization" -e ncdu / } <>
-        [exec] (Editres) {editres} <>
-        [exec] (Xfontsel) {xfontsel} <>
-        [exec] (Xkill) {xkill} <>
-        [exec] (Xrefresh) {xrefresh} <>
-    [end]
-    [config] (Configuration)
-    [workspaces] (Workspaces)
-[end]
-EOF
-
-# Set up non-root user (if one exists)
-if [ "${USERNAME}" != "root" ]; then 
-    touch /home/${USERNAME}/.Xmodmap
-    cp -R /root/.fluxbox /home/${USERNAME}
-    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.Xmodmap /home/${USERNAME}/.fluxbox
-    chown ${USERNAME}:root /usr/local/share/desktop-init.sh /usr/local/bin/set-resolution /usr/local/etc/vscode-dev-containers/vnc-passwd
+# Set up fluxbox config
+copy_fluxbox_config "/root"
+if [ "${USERNAME}" != "root" ]; then
+    copy_fluxbox_config "/home/${USERNAME}"
+    chown -R ${USERNAME} /home/${USERNAME}/.Xmodmap /home/${USERNAME}/.fluxbox
 fi
 
-echo "Done!"
+cat << EOF
+
+
+You now have a working desktop! Connect to in one of the following ways:
+
+- Forward port ${NOVNC_PORT} and use a web browser start the noVNC client (recommended)
+- Forward port ${VNC_PORT} using VS Code client and connect using a VNC Viewer
+
+In both cases, use the password "${VNC_PASSWORD}" when connecting
+
+(*) Done!
+
+EOF
+
