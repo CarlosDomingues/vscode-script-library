@@ -18,7 +18,8 @@ jobs:
           echo $GITHUB_WORKSPACE
           pwd
           git branch -a
-          git checkout remotes/origin/release
+          git fetch
+          git checkout release
           git clone https://github.com/microsoft/vscode-dev-containers.git
           cp -r vscode-dev-containers/script-library/*.sh .
           rm -rf vscode-dev-containers
