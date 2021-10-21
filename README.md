@@ -1,3 +1,5 @@
+[![Update Scripts](https://github.com/CarlosDomingues/vscode-script-library/actions/workflows/update.yml/badge.svg)](https://github.com/CarlosDomingues/vscode-script-library/actions/workflows/update.yml)
+
 # vscode-script-library
 
 A slim, up-to-date fork of VS Code's [bash script library](https://github.com/microsoft/vscode-dev-containers/tree/main/script-library) optimized to be used as a [Git Submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules).
